@@ -47,8 +47,8 @@ from tensorflow.python.client import timeline
 
 from termcolor import colored
 
-import music_data_utils
-from midi_statistics import get_all_stats
+# import music_data_utils
+# from midi_statistics import get_all_stats
 import data_loader
 
 flags = tf.flags
@@ -147,11 +147,11 @@ flags.DEFINE_boolean("end_classification", False, "Classify only in ends of D. O
 FLAGS = flags.FLAGS
 
 model_layout_flags = ['num_layers_g', 'num_layers_d', 'meta_layer_size', 'hidden_size_g', 'hidden_size_d', 'biscale_slow_layer_ticks', 'multiscale', 'multiscale', 'disable_feed_previous', 'pace_events', 'minibatch_d', 'unidirectional_d', 'feature_matching', 'composer']
-
+# TODO: FIX function parameters
 def make_rnn_cell(rnn_layer_sizes,
                   dropout_keep_prob=1.0,
                   attn_length=0,
-                  base_cell=tf.compat.v1.nn.rnn_cell.BasicLSTMCell,
+                  base_cell=tf.keras.layers.LSTMCell,
                   state_is_tuple=True,
                   reuse=False):
   """Makes a RNN cell from the given hyperparameters.
@@ -169,13 +169,11 @@ def make_rnn_cell(rnn_layer_sizes,
   """
   cells = []
   for num_units in rnn_layer_sizes:    
-    cell = base_cell(num_units, state_is_tuple=state_is_tuple, reuse=reuse)
-    cell = tf.contrib.rnn.DropoutWrapper(
-        cell, output_keep_prob=dropout_keep_prob)
+    cell = base_cell(num_units, dropout=1-dropout_keep_prob)
     cells.append(cell)
 
-  cell = tf.contrib.rnn.MultiRNNCell(cells)
-  #cell = tf.keras.layers.StackedRNNCells(cells,state_is_tuple=state_is_tuple)
+  #cell = tf.contrib.rnn.MultiRNNCell(cells)
+  cell = tf.keras.layers.StackedRNNCells(cells)
   if attn_length:
     cell = tf.contrib.rnn.AttentionCellWrapper(
         cell, attn_length, state_is_tuple=state_is_tuple, reuse=reuse)
@@ -224,13 +222,15 @@ def l2_regularizer(scale,scope=None):
 
 
 def linear(inp, output_dim, scope=None, stddev=1.0, reuse_scope=False):
-  norm = tf.random_normal_initializer(stddev=stddev, dtype=data_type())
-  const = tf.constant_initializer(0.0, dtype=data_type())
+  norm = tf.random_normal_initializer(stddev=stddev)
+  const = tf.constant_initializer(0.0)
   with tf.compat.v1.variable_scope(scope or 'linear') as scope:
     scope.set_regularizer(tf.contrib.layers.l2_regularizer(scale=FLAGS.reg_scale))
     if reuse_scope:
       scope.reuse_variables()
     #print('inp.get_shape(): {}'.format(inp.get_shape()))
+    sh1 = inp.get_shape()[1]
+    sh2 = output_dim
     w = tf.compat.v1.get_variable('w', [inp.get_shape()[1], output_dim], initializer=norm, dtype=data_type())
     b = tf.compat.v1.get_variable('b', [output_dim], initializer=const, dtype=data_type())
   return tf.matmul(inp, w) + b
@@ -293,7 +293,9 @@ class RNNGAN(object):
          cell = make_rnn_cell([FLAGS.hidden_size_g]*FLAGS.num_layers_g)	  
 
       #cell = tf.nn.rnn_cell.MultiRNNCell([lstm_cell for _ in range( FLAGS.num_layers_g)], state_is_tuple=True)
-      self._initial_state = cell.zero_state(batch_size, data_type())
+      random_inputs = tf.random.uniform(shape=[batch_size, songlength, int(num_song_features)], minval=0.0, maxval=1.0, dtype=data_type())
+      #self._initial_state = cell.zero_state(batch_size, data_type())
+      self._initial_state = cell.get_initial_state(random_inputs,batch_size)
 
       # TODO: (possibly temporarily) disabling meta info
       if FLAGS.generate_meta:
@@ -463,7 +465,7 @@ class RNNGAN(object):
     #inputs[0] = tf.Print(inputs[0], [inputs[0]],
     #        '{} inputs[0] = '.format(msg), summarize=20, first_n=20)
     if is_training and FLAGS.keep_prob < 1:
-      inputs = [tf.nn.dropout(input_, FLAGS.keep_prob) for input_ in inputs]      
+      inputs = [tf.nn.dropout(input_, rate=1-FLAGS.keep_prob) for input_ in inputs]      
     
     #lstm_cell = tf.nn.rnn_cell.BasicLSTMCell(FLAGS.hidden_size_d, forget_bias=1.0, state_is_tuple=True)
     if is_training and FLAGS.keep_prob < 1:
@@ -478,7 +480,7 @@ class RNNGAN(object):
       cell_bw = make_rnn_cell([FLAGS.hidden_size_d]* FLAGS.num_layers_d)
     #cell_fw = tf.nn.rnn_cell.MultiRNNCell([lstm_cell for _ in range( FLAGS.num_layers_d)], state_is_tuple=True)
     
-    self._initial_state_fw = cell_fw.zero_state(self.batch_size, data_type())
+    #self._initial_state_fw = cell_fw.zero_state(self.batch_size, data_type())
     
     if not FLAGS.unidirectional_d:
       #lstm_cell = tf.nn.rnn_cell.BasicLSTMCell(FLAGS.hidden_size_g, forget_bias=1.0, state_is_tuple=True)
@@ -501,8 +503,14 @@ class RNNGAN(object):
       #state = tf.concat(state_fw, state_bw)
       #endoutput = tf.concat(concat_dim=1, values=[outputs[0],outputs[-1]])
     else:      
-      outputs, state = tf.nn.static_rnn(cell_fw, inputs,initial_state=self._initial_state_fw)
-      #state = self._initial_state      
+      # outputs, state = tf.nn.static_rnn(cell_fw, inputs,initial_state=self._initial_state_fw)
+      
+      inputs = tf.convert_to_tensor(inputs,dtype=data_type())
+      initial_state_fw = cell_fw.get_initial_state(inputs,self.batch_size, dtype=data_type())
+      rnn_layer = tf.keras.layers.RNN(cell_fw,unroll=True,return_state=True, return_sequences=True, stateful=True)
+      # initial_states = rnn_layer.get_initial_state(inputs)
+      outputs,states,_ = rnn_layer(inputs,initial_state_fw)
+      
 	  
       #outputs, state = cell_fw(tf.convert_to_tensor (inputs),state)
       #endoutput = outputs[-1]
@@ -516,7 +524,12 @@ class RNNGAN(object):
       decisions = tf.transpose(decisions, perm=[1,0,2])
       print('shape, decisions: {}'.format(decisions.get_shape()))
     else:
-      decisions = [tf.sigmoid(linear(output, 1, 'decision', reuse_scope=(i!=0))) for i,output in enumerate(outputs)]
+      decisions = []
+      # print("shape outputs",outputs.get_shape())
+      for i in range(outputs.get_shape()[0]):
+        res = tf.sigmoid(linear(outputs[i], 1, 'decision', reuse_scope=(i!=0)))
+        decisions.append(res)
+      #decisions = [tf.sigmoid(linear(output, 1, 'decision', reuse_scope=(i!=0))) for i,output in enumerate(outputs)]
       decisions = tf.stack(decisions)
       decisions = tf.transpose(decisions, perm=[1,0,2])
       print('shape, decisions: {}'.format(decisions.get_shape()))
@@ -524,7 +537,11 @@ class RNNGAN(object):
     # decision = tf.Print(decision, [decision],
             # '{} decision = '.format(msg), summarize=20, first_n=20)
     return (decision,tf.transpose(tf.stack(outputs), perm=[1,0,2]))
-      
+
+  @tf.function
+  def get_list_from_tensor(self,tensor):
+    output = list(tensor)
+    return output
 
   
   def assign_lr(self, session, lr_value):
