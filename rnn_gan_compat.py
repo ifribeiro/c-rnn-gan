@@ -49,6 +49,7 @@ from termcolor import colored
 
 import music_data_utils
 from midi_statistics import get_all_stats
+import data_loader
 
 flags = tf.flags
 logging = tf.logging
@@ -88,7 +89,7 @@ flags.DEFINE_integer("num_layers_g", 2,                 # 2
                    "Number of stacked recurrent cells in G.")
 flags.DEFINE_integer("num_layers_d", 2,                 # 2
                    "Number of stacked recurrent cells in D.")
-flags.DEFINE_integer("songlength", 100,               # 200, 500
+flags.DEFINE_integer("songlength", 48,               # 200, 500
                    "Limit song inputs to this number of events.")
 flags.DEFINE_integer("meta_layer_size", 200,          # 300, 600
                    "Size of hidden layer for meta information module.")
@@ -98,9 +99,9 @@ flags.DEFINE_integer("hidden_size_d", 100,              # 200, 1500
                    "Hidden size for recurrent part of D. Default: same as for G.")
 flags.DEFINE_integer("epochs_before_decay", 60,       # 40, 140
                    "Number of epochs before starting to decay.")
-flags.DEFINE_integer("max_epoch", 500,                # 500, 500
+flags.DEFINE_integer("max_epoch", 100,                # 500, 500
                    "Number of epochs before stopping training.")
-flags.DEFINE_integer("batch_size", 10,                # 10, 20
+flags.DEFINE_integer("batch_size", 64,                # 10, 20
                    "Batch size.")
 flags.DEFINE_integer("biscale_slow_layer_ticks", 8,   # 8
                    "Biscale slow layer ticks. Not implemented yet.")
@@ -167,14 +168,14 @@ def make_rnn_cell(rnn_layer_sizes,
       A tf.contrib.rnn.MultiRNNCell based on the given hyperparameters.
   """
   cells = []
-  for num_units in rnn_layer_sizes:
+  for num_units in rnn_layer_sizes:    
     cell = base_cell(num_units, state_is_tuple=state_is_tuple, reuse=reuse)
     cell = tf.contrib.rnn.DropoutWrapper(
         cell, output_keep_prob=dropout_keep_prob)
     cells.append(cell)
 
-  # cell = tf.contrib.rnn.MultiRNNCell(cells, state_is_tuple=state_is_tuple)
-  cell = tf.keras.layers.StackedRNNCells(cells,state_is_tuple=state_is_tuple)
+  cell = tf.contrib.rnn.MultiRNNCell(cells)
+  #cell = tf.keras.layers.StackedRNNCells(cells,state_is_tuple=state_is_tuple)
   if attn_length:
     cell = tf.contrib.rnn.AttentionCellWrapper(
         cell, attn_length, state_is_tuple=state_is_tuple, reuse=reuse)
@@ -243,28 +244,29 @@ def minibatch(inp, num_kernels=25, kernel_dim=10, scope=None, msg='', reuse_scop
     if reuse_scope:
       scope.reuse_variables()
   
-    inp = tf.Print(inp, [inp],
-            '{} inp = '.format(msg), summarize=20, first_n=20)
+    # inp = tf.Print(inp, [inp],
+    #         '{} inp = '.format(msg), summarize=20, first_n=20)
+    
     x = tf.sigmoid(linear(inp, num_kernels * kernel_dim, scope))
     activation = tf.reshape(x, (-1, num_kernels, kernel_dim))
-    activation = tf.Print(activation, [activation],
-            '{} activation = '.format(msg), summarize=20, first_n=20)
+    # activation = tf.Print(activation, [activation],
+    #         '{} activation = '.format(msg), summarize=20, first_n=20)
     diffs = tf.expand_dims(activation, 3) - \
                 tf.expand_dims(tf.transpose(activation, [1, 2, 0]), 0)
-    diffs = tf.Print(diffs, [diffs],
-            '{} diffs = '.format(msg), summarize=20, first_n=20)
+    # diffs = tf.Print(diffs, [diffs],
+    #         '{} diffs = '.format(msg), summarize=20, first_n=20)
     abs_diffs = tf.reduce_sum(tf.abs(diffs), 2)
-    abs_diffs = tf.Print(abs_diffs, [abs_diffs],
-            '{} abs_diffs = '.format(msg), summarize=20, first_n=20)
+    # abs_diffs = tf.Print(abs_diffs, [abs_diffs],
+    #         '{} abs_diffs = '.format(msg), summarize=20, first_n=20)
     minibatch_features = tf.reduce_sum(tf.exp(-abs_diffs), 2)
-    minibatch_features = tf.Print(minibatch_features, [tf.reduce_min(minibatch_features), tf.reduce_max(minibatch_features)],
-            '{} minibatch_features (min,max) = '.format(msg), summarize=20, first_n=20)
+    # minibatch_features = tf.Print(minibatch_features, [tf.reduce_min(minibatch_features), tf.reduce_max(minibatch_features)],
+    #         '{} minibatch_features (min,max) = '.format(msg), summarize=20, first_n=20)
   return tf.concat( [inp, minibatch_features],1)
 
 class RNNGAN(object):
   """The RNNGAN model."""
 
-  def __init__(self, is_training, num_song_features=None, num_meta_features=None):
+  def __init__(self, is_training, num_song_features=None, num_meta_features=None, session=None):
     batch_size = FLAGS.batch_size
     self.batch_size =  batch_size
 	
@@ -372,8 +374,9 @@ class RNNGAN(object):
     reg_losses = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.REGULARIZATION_LOSSES)
     reg_constant = 0.1  # Choose an appropriate one.
     reg_loss = reg_constant * sum(reg_losses)
-    reg_loss = tf.Print(reg_loss, reg_losses,
-                  'reg_losses = ', summarize=20, first_n=20)
+    # reg_loss = tf.Print(reg_loss, reg_losses,
+    #               'reg_losses = ', summarize=20, first_n=20)
+
     #if not FLAGS.disable_l2_regularizer:
     #  print('L2 regularization. Reg losses: {}'.format([v.name for v in reg_losses]))
    
@@ -474,7 +477,9 @@ class RNNGAN(object):
       
       cell_bw = make_rnn_cell([FLAGS.hidden_size_d]* FLAGS.num_layers_d)
     #cell_fw = tf.nn.rnn_cell.MultiRNNCell([lstm_cell for _ in range( FLAGS.num_layers_d)], state_is_tuple=True)
+    
     self._initial_state_fw = cell_fw.zero_state(self.batch_size, data_type())
+    
     if not FLAGS.unidirectional_d:
       #lstm_cell = tf.nn.rnn_cell.BasicLSTMCell(FLAGS.hidden_size_g, forget_bias=1.0, state_is_tuple=True)
       #if is_training and FLAGS.keep_prob < 1:
@@ -495,8 +500,8 @@ class RNNGAN(object):
       #        '{} outputs[0] = '.format(msg), summarize=20, first_n=20)
       #state = tf.concat(state_fw, state_bw)
       #endoutput = tf.concat(concat_dim=1, values=[outputs[0],outputs[-1]])
-    else:
-      outputs, state = tf.nn.rnn(cell_fw, inputs, initial_state=self._initial_state_fw)
+    else:      
+      outputs, state = tf.nn.static_rnn(cell_fw, inputs,initial_state=self._initial_state_fw)
       #state = self._initial_state      
 	  
       #outputs, state = cell_fw(tf.convert_to_tensor (inputs),state)
@@ -577,7 +582,7 @@ def run_epoch(session, model, loader, datasetlabel, eval_op_g, eval_op_d, pretra
   times_in_python = []
   #times_in_batchreading = []
   loader.rewind(part=datasetlabel)
-  [batch_meta, batch_song] = loader.get_batch(model.batch_size, model.songlength, part=datasetlabel)
+  [batch_meta, batch_song] = loader.get_batch(model.batch_size, part=datasetlabel)
   run_options = tf.compat.v1.RunOptions(trace_level=tf.compat.v1.RunOptions.FULL_TRACE)
   while batch_meta is not None and batch_song is not None:    
     op_g = eval_op_g
@@ -644,7 +649,7 @@ def run_epoch(session, model, loader, datasetlabel, eval_op_g, eval_op_d, pretra
       else:
         print("{}: {} batch loss: G: {:.3f}, D: {:.3f}, avg loss: G: {:.3f}, D: {:.3f} speed: {:.1f} songs/s, avg in graph: {:.1f}, avg in python: {:.1f}.".format(datasetlabel, iters, g_loss, d_loss, float(g_losses)/float(iters), float(d_losses)/float(iters),songs_per_sec, avg_time_in_graph, avg_time_in_python))
     #batchtime = time.time()
-    [batch_meta, batch_song] = loader.get_batch(model.batch_size, model.songlength, part=datasetlabel)
+    [batch_meta, batch_song] = loader.get_batch(model.batch_size,part=datasetlabel)
     #times_in_batchreading.append(time.time()-batchtime)
 
   if iters == 0:
@@ -684,6 +689,7 @@ def main(_):
   if not FLAGS.traindir:
     raise ValueError("Must set --traindir to dir where I can save model and plots.")
   print("Max epochs", FLAGS.max_epoch)
+  print("Unidirectinal",FLAGS.unidirectional_d)
  
   restore_flags()
  
@@ -720,11 +726,14 @@ def main(_):
     print('Training on synthetic chords!')
   if FLAGS.composer is not None:
     print('Single composer: {}'.format(FLAGS.composer))
-  loader = music_data_utils.MusicDataLoader(FLAGS.datadir, FLAGS.select_validation_percentage, FLAGS.select_test_percentage, FLAGS.works_per_composer, FLAGS.pace_events, synthetic=synthetic, tones_per_cell=FLAGS.tones_per_cell, single_composer=FLAGS.composer)
-  if FLAGS.synthetic_chords:
-    # This is just a print out, to check the generated data.
-    batch = loader.get_batch(batchsize=1, songlength=400)
-    loader.get_midi_pattern([batch[1][0][i] for i in xrange(batch[1].shape[1])])
+  #loader = music_data_utils.MusicDataLoader(FLAGS.datadir, FLAGS.select_validation_percentage, FLAGS.select_test_percentage, FLAGS.works_per_composer, FLAGS.pace_events, synthetic=synthetic, tones_per_cell=FLAGS.tones_per_cell, single_composer=FLAGS.composer)
+  loader = data_loader.DataLoader(FLAGS.datadir,FLAGS.select_validation_percentage,FLAGS.select_test_percentage,filename="data.npy",
+                                  n_samples=10000,n_features=1,n_steps=48)
+  
+  # if FLAGS.synthetic_chords:
+  #   # This is just a print out, to check the generated data.
+  #   batch = loader.get_batch(batchsize=1, songlength=400)
+  #   loader.get_midi_pattern([batch[1][0][i] for i in xrange(batch[1].shape[1])])
 
   num_song_features = loader.get_num_song_features()
   print('num_song_features:{}'.format(num_song_features))
@@ -735,18 +744,18 @@ def main(_):
   checkpoint_path = os.path.join(FLAGS.traindir, "model.ckpt")
 
   songlength_ceiling = FLAGS.songlength
-
-  if global_step < FLAGS.pretraining_epochs:
-    FLAGS.songlength = int(min(((global_step+10)/10)*10,songlength_ceiling))
-    FLAGS.songlength = int(min((global_step+1)*4,songlength_ceiling))
+  # escolhe o tamanho de songlength
+  # if global_step < FLAGS.pretraining_epochs: 
+  #   FLAGS.songlength = int(min(((global_step+10)/10)*10,songlength_ceiling))
+  #   FLAGS.songlength = int(min((global_step+1)*4,songlength_ceiling))
  
   with tf.Graph().as_default(), tf.compat.v1.Session(config=tf.compat.v1.ConfigProto(log_device_placement=FLAGS.log_device_placement)) as session:
     with tf.compat.v1.variable_scope("model", reuse=None) as scope:
       scope.set_regularizer(tf.contrib.layers.l2_regularizer(scale=FLAGS.reg_scale))
       # TODO OK
-      m = RNNGAN(is_training=True, num_song_features=num_song_features, num_meta_features=num_meta_features)
+      m = RNNGAN(is_training=True, num_song_features=num_song_features, num_meta_features=num_meta_features,session=session)
 
-
+    # default: FALSE
     if FLAGS.initialize_d:
       vars_to_restore = {}
       for v in tf.trainable_variables():
@@ -774,25 +783,30 @@ def main(_):
         session.run(tf.compat.v1.global_variables_initializer())
 
     run_metadata = None
+    # default: False
     if FLAGS.profiling:
       run_metadata = tf.RunMetadata()
+    # default: False
     if not FLAGS.sample: # if is training
+      print ("Training...")
       train_g_loss,train_d_loss = 1.0,1.0
       for i in range(global_step, FLAGS.max_epoch):
         lr_decay = FLAGS.lr_decay ** max(i - FLAGS.epochs_before_decay, 0.0)
-
-        if global_step < FLAGS.pretraining_epochs:
-          #new_songlength = int(min(((i+10)/10)*10,songlength_ceiling))
-          new_songlength = int(min((i+1)*4,songlength_ceiling))
-        else:
-          new_songlength = songlength_ceiling
-        if new_songlength != FLAGS.songlength:
-          print('Changing songlength, now training on {} events from songs.'.format(new_songlength))
-          FLAGS.songlength = new_songlength
-          with tf.compat.v1.variable_scope("model", reuse=True) as scope:
-            scope.set_regularizer(tf.contrib.layers.l2_regularizer(scale=FLAGS.reg_scale))
-            # TODO: num_song_features = 1, para o nosso caso. num_meta_features???
-            m = RNNGAN(is_training=True, num_song_features=num_song_features, num_meta_features=num_meta_features)
+        """
+        Change the songlength. Not useful for our case
+        """
+        # if global_step < FLAGS.pretraining_epochs:
+        #   #new_songlength = int(min(((i+10)/10)*10,songlength_ceiling))
+        #   new_songlength = int(min((i+1)*4,songlength_ceiling))
+        # else:
+        #   new_songlength = songlength_ceiling
+        # if new_songlength != FLAGS.songlength:
+        #   print('Changing songlength, now training on {} events from songs.'.format(new_songlength))
+        #   FLAGS.songlength = new_songlength
+        #   with tf.compat.v1.variable_scope("model", reuse=True) as scope:
+        #     scope.set_regularizer(tf.contrib.layers.l2_regularizer(scale=FLAGS.reg_scale))
+        #     # TODO: num_song_features = 1, para o nosso caso. num_meta_features???
+        #     m = RNNGAN(is_training=True, num_song_features=num_song_features, num_meta_features=num_meta_features)
 
         if not FLAGS.adam:
           m.assign_lr(session, FLAGS.learning_rate * lr_decay)
@@ -878,52 +892,56 @@ def main(_):
           print('failed to run gnuplot. Please do so yourself: gnuplot gnuplot-commands.txt cwd={}'.format(plots_dir))
         
         song_data = sample(session, m, batch=True)
-        midi_patterns = []
-        print('formatting midi...')
-        midi_time = time.time()
-        for d in song_data:
-          midi_patterns.append(loader.get_midi_pattern(d))
-        print('done. time: {}'.format(time.time()-midi_time))
+        song_data = np.array(song_data)
+        print ("Saving data...")
+        np.save('song_data.npy',song_data)
+
+        # midi_patterns = []
+        # print('formatting midi...')
+        # midi_time = time.time()
+        # for d in song_data:
+        #   midi_patterns.append(loader.get_midi_pattern(d))
+        # print('done. time: {}'.format(time.time()-midi_time))
         
-        filename = os.path.join(generated_data_dir, 'out-{}-{}-{}.mid'.format(experiment_label, i, datetime.datetime.today().strftime('%Y-%m-%d-%H-%M-%S')))
-        loader.save_midi_pattern(filename, midi_patterns[0])
+        # filename = os.path.join(generated_data_dir, 'out-{}-{}-{}.mid'.format(experiment_label, i, datetime.datetime.today().strftime('%Y-%m-%d-%H-%M-%S')))
+        # loader.save_midi_pattern(filename, midi_patterns[0])
   
-        stats = []
-        print('getting stats...')
-        stats_time = time.time()
-        for p in midi_patterns:
-          stats.append(get_all_stats(p))
-        print('done. time: {}'.format(time.time()-stats_time))
-        #print(stats)
-        stats = [stat for stat in stats if stat is not None]
-        if len(stats):
-          stats_keys_string = ['scale']
-          stats_keys = ['scale_score', 'tone_min', 'tone_max', 'tone_span', 'freq_min', 'freq_max', 'freq_span', 'tones_unique', 'repetitions_2', 'repetitions_3', 'repetitions_4', 'repetitions_5', 'repetitions_6', 'repetitions_7', 'repetitions_8', 'repetitions_9', 'estimated_beat', 'estimated_beat_avg_ticks_off', 'intensity_min', 'intensity_max', 'intensity_span', 'polyphony_score', 'top_2_interval_difference', 'top_3_interval_difference', 'num_tones']
-          statsfilename = os.path.join(plots_dir, 'midi_stats.gnuplot')
-          if not os.path.exists(statsfilename):
-            with open(statsfilename, 'a') as f:
-              f.write('# Average numers over one minibatch of size {}.\n'.format(FLAGS.batch_size))
-              f.write('# global-step {} {}\n'.format(' '.join([s.replace(' ', '_') for s in stats_keys_string]), ' '.join(stats_keys)))
-          with open(statsfilename, 'a') as f:
-            f.write('{} {} {}\n'.format(i, ' '.join(['{}'.format(stats[0][key].replace(' ', '_')) for key in stats_keys_string]), ' '.join(['{:.3f}'.format(sum([s[key] for s in stats])/float(len(stats))) for key in stats_keys])))
-          print('Saved {}.'.format(filename))
+        # stats = []
+        # print('getting stats...')
+        # stats_time = time.time()
+        # for p in midi_patterns:
+        #   stats.append(get_all_stats(p))
+        # print('done. time: {}'.format(time.time()-stats_time))
+        # #print(stats)
+        # stats = [stat for stat in stats if stat is not None]
+        # if len(stats):
+        #   stats_keys_string = ['scale']
+        #   stats_keys = ['scale_score', 'tone_min', 'tone_max', 'tone_span', 'freq_min', 'freq_max', 'freq_span', 'tones_unique', 'repetitions_2', 'repetitions_3', 'repetitions_4', 'repetitions_5', 'repetitions_6', 'repetitions_7', 'repetitions_8', 'repetitions_9', 'estimated_beat', 'estimated_beat_avg_ticks_off', 'intensity_min', 'intensity_max', 'intensity_span', 'polyphony_score', 'top_2_interval_difference', 'top_3_interval_difference', 'num_tones']
+        #   statsfilename = os.path.join(plots_dir, 'midi_stats.gnuplot')
+        #   if not os.path.exists(statsfilename):
+        #     with open(statsfilename, 'a') as f:
+        #       f.write('# Average numers over one minibatch of size {}.\n'.format(FLAGS.batch_size))
+        #       f.write('# global-step {} {}\n'.format(' '.join([s.replace(' ', '_') for s in stats_keys_string]), ' '.join(stats_keys)))
+        #   with open(statsfilename, 'a') as f:
+        #     f.write('{} {} {}\n'.format(i, ' '.join(['{}'.format(stats[0][key].replace(' ', '_')) for key in stats_keys_string]), ' '.join(['{:.3f}'.format(sum([s[key] for s in stats])/float(len(stats))) for key in stats_keys])))
+        #   print('Saved {}.'.format(filename))
           
-        if do_exit:
-          if FLAGS.call_after is not None:
-            print("%s: Will call \"%s\" before exiting."%(datetime.datetime.today().strftime('%Y-%m-%d %H:%M:%S'), FLAGS.call_after))
-            res = call(FLAGS.call_after.split(" "))
-            print ('{}: call returned {}.'.format(datetime.datetime.today().strftime('%Y-%m-%d %H:%M:%S'), res))
-          exit()
+        # if do_exit:
+        #   if FLAGS.call_after is not None:
+        #     print("%s: Will call \"%s\" before exiting."%(datetime.datetime.today().strftime('%Y-%m-%d %H:%M:%S'), FLAGS.call_after))
+        #     res = call(FLAGS.call_after.split(" "))
+        #     print ('{}: call returned {}.'.format(datetime.datetime.today().strftime('%Y-%m-%d %H:%M:%S'), res))
+        #   exit()
         sys.stdout.flush()
 
+      # TODO descomentar essa parte
+      # test_g_loss,test_d_loss = run_epoch(session, m, loader, 'test', tf.no_op(), tf.no_op())
+      # print("Test loss G: %.3f, D: %.3f" %(test_g_loss, test_d_loss))
 
-      test_g_loss,test_d_loss = run_epoch(session, m, loader, 'test', tf.no_op(), tf.no_op())
-      print("Test loss G: %.3f, D: %.3f" %(test_g_loss, test_d_loss))
-
-    song_data = sample(session, m)
-    filename = os.path.join(generated_data_dir, 'out-{}-{}-{}.mid'.format(experiment_label, i, datetime.datetime.today().strftime('%Y-%m-%d-%H-%M-%S')))
-    loader.save_data(filename, song_data)
-    print('Saved {}.'.format(filename))
+    # song_data = sample(session, m)
+    # filename = os.path.join(generated_data_dir, 'out-{}-{}-{}.mid'.format(experiment_label, i, datetime.datetime.today().strftime('%Y-%m-%d-%H-%M-%S')))
+    # loader.save_data(filename, song_data)
+    # print('Saved {}.'.format(filename))
     
 
 if __name__ == "__main__":
