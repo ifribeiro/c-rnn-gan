@@ -835,9 +835,7 @@ def main(_):
         if i<FLAGS.pretraining_epochs:
           opt_d = tf.no_op()
           if FLAGS.pretraining_d:
-            opt_d = m.opt_d
-          print (colored("i < FLAGS.pretraining_epochs", 'red'))
-          
+            opt_d = m.opt_d          
           train_g_loss,train_d_loss = run_epoch(session, m, loader, 'train', m.opt_pretraining, opt_d, pretraining = True, verbose=True, run_metadata=run_metadata, pretraining_d=FLAGS.pretraining_d)
           if FLAGS.pretraining_d:
             try:
@@ -959,7 +957,7 @@ def main(_):
     # filename = os.path.join(generated_data_dir, 'out-{}-{}-{}.mid'.format(experiment_label, i, datetime.datetime.today().strftime('%Y-%m-%d-%H-%M-%S')))
     # loader.save_data(filename, song_data)
     # print('Saved {}.'.format(filename))
-    
+
 
 if __name__ == "__main__":
   tf.compat.v1.app.run()
