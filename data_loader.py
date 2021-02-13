@@ -1,41 +1,58 @@
+"""
+This code was based on the code music_data_utils, wryten by Olof Mogren, http://mogren.one/
+in the project: https://github.com/olofmogren/c-rnn-gan
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+"""
+
 import numpy as np
-from sys import exc_info
-from numpy import save, load
-# params = [sys.argv[1], 10, 20,1,True,'chords',1,"adam"]
+from numpy import load
 
 class DataLoader(object):
-    def __init__(self, datadir, validation_percentage, test_percentage,filename="",
-                works_per_composer=None, pace_events=False, synthetic=None, tones_per_cell=1, 
-                single_composer=None, n_samples=None, n_features=1, n_steps=1):        
+    def __init__(self, datadir, validation_percentage, test_percentage,filename="", n_samples=None, n_features=None, n_steps=None):        
         self.pointer = {}
         self.datadir = datadir
         self.pointer['validation'] = 0
         self.pointer['test'] = 0
         self.pointer['train'] = 0
 
-        self.numsamples = n_samples
-        self.num_features = n_features
-        self.num_steps = n_steps
-
-
-        if synthetic == 'chords':
-            self.generate_chords(pace_events=pace_events)
+        self.n_samples = n_samples
+        self.n_features = n_features
+        self.n_steps = n_steps
 
         self.read_data(filename,validation_percentage,test_percentage)
 
     def read_data(self,filename,val_percentage=None,test_percentage=None):
-        # self.data = np.random.randn(100,48,1)
+        """
+        Loads the dataset that is in the datadir directory provided
+
+        Args:
+            filename: the dataset's name (i.e. data.npy)
+            val_percentage: percentage of the data that will be used as validation
+            test_percentage: percentage of the data that will be used as test
+
+        Returns a array with dimensions [n_samples,n_steps,n_features]
+
+        """
 
         self.data = load(self.datadir+filename)
-        # data is not in correct shape
-        valid_shape = (self.numsamples,self.num_steps,self.num_features)
+        valid_shape = (self.n_samples,self.n_steps,self.n_features)
         if self.data.shape!= valid_shape:
             print("Reshaping...")
             try:
                 self.data = self.data.reshape(valid_shape)
             except:                
-                print("The data with shape {} couldn't be reshaped to {}, provide valid".format(self.data.shape, valid_shape))
-                exit()        
+                raise ("The data with shape {} couldn't be reshaped to {}, provide valid dimensions".format(self.data.shape, valid_shape))                        
 
         self.songs = {}
         self.songs['validation'] = []
@@ -63,16 +80,18 @@ class DataLoader(object):
             self.songs['test']  = self.data
             self.songs['validation'] = self.data
         
-
         # pointers
         self.pointer['validation']  = 0
         self.pointer['test'] = 0
         self.pointer['train'] = 0
 
-    # TODO remove unused parameters
     def get_batch(self,batch_size,part='train'):
         """
-        Returns a batch with the dimension [batch_size,self.num_steps,self.num_features]
+        Returns a batch
+        Args:
+            batch_size: the number of samples that will be drawed from the original data
+
+        Returns a array with the dimension [batch_size,self.num_steps,self.num_features]
         """
 
         if (self.pointer[part]>len(self.songs[part])-batch_size):
@@ -90,20 +109,12 @@ class DataLoader(object):
 
         else:
             raise 'get_batch() called but self.songs is not initialized.'
-
-    def test_sizes(self):
-
-        print("data size: ",len(self.data))
-        print("train:", len(self.songs['train']))
-        print("test:", len(self.songs['test']))
-        print("validation:", len(self.songs['validation']))
     
-    def generate_chords(self,):
-        pass
-    
-    
-    def get_num_song_features(self):
-        return self.num_features
+    def get_num_features(self):
+        """
+        Returns the number of features
+        """
+        return self.n_features
 
     def get_num_meta_features(self):
         # just for test purposes
@@ -111,33 +122,6 @@ class DataLoader(object):
     
     def rewind(self,part='train'):
         """
-        Reset the pointer for the 'part'
-        (default is 'train')
+        Reset the pointer for the 'part'        
         """
         self.pointer[part] = 0
-
-    def get_midi_pattern(self,array):
-        """
-        Don't need to be implemented
-        """
-        pass
-    def save_midi_pattern(self,filename, array):
-        """
-        Saves the generated data
-        """
-        if filename is not None:
-            try:
-                save(filename,array)                    
-            except:
-                print("ERROR: {} ocurred".format(exc_info()[0]))
-
-    def save_data(self,filename,data):
-        pass
-
-
-
-
-
-
-
-
