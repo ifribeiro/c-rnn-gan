@@ -17,9 +17,10 @@ limitations under the License.
 
 import numpy as np
 from numpy import load
+from sklearn.preprocessing import MinMaxScaler
 
 class DataLoader(object):
-    def __init__(self, datadir, validation_percentage, test_percentage,filename="", n_samples=None, n_features=None, n_steps=None):        
+    def __init__(self, datadir, validation_percentage, test_percentage,filename="", n_samples=None, n_features=None, n_steps=None,scale=False):        
         self.pointer = {}
         self.datadir = datadir
         self.pointer['validation'] = 0
@@ -30,9 +31,9 @@ class DataLoader(object):
         self.n_features = n_features
         self.n_steps = n_steps
 
-        self.read_data(filename,validation_percentage,test_percentage)
+        self.read_data(filename,validation_percentage,test_percentage,scale)
 
-    def read_data(self,filename,val_percentage=None,test_percentage=None):
+    def read_data(self,filename,val_percentage=None,test_percentage=None,scale=False):
         """
         Loads the dataset that is in the datadir directory provided
 
@@ -40,19 +41,25 @@ class DataLoader(object):
             filename: the dataset's name (i.e. data.npy)
             val_percentage: percentage of the data that will be used as validation
             test_percentage: percentage of the data that will be used as test
+            scale: indicates if the data should be scaled or not (if data is not in [0,1] range
+            it should be scaled)
 
         Returns a array with dimensions [n_samples,n_steps,n_features]
 
         """
 
         self.data = load(self.datadir+filename)
+        if scale:
+            self.data = self.scale_data(self.data)
+    
         valid_shape = (self.n_samples,self.n_steps,self.n_features)
         if self.data.shape!= valid_shape:
             print("Reshaping...")
             try:
                 self.data = self.data.reshape(valid_shape)
             except:                
-                raise ("The data with shape {} couldn't be reshaped to {}, provide valid dimensions".format(self.data.shape, valid_shape))                        
+                print ("The data with shape {} couldn't be reshaped to {}, provide a valid shape.".format(self.data.shape, valid_shape))                        
+                exit()
 
         self.songs = {}
         self.songs['validation'] = []
@@ -125,3 +132,19 @@ class DataLoader(object):
         Reset the pointer for the 'part'        
         """
         self.pointer[part] = 0
+        
+    def scale_data(self,data):
+        """
+        Scale the data
+        Args:
+            data: data to be scaled using the MinMaxScaler
+        Returns:
+            The data scaled
+        """
+
+        scaler = MinMaxScaler()
+        data = data.reshape(-1,1)
+        scaler = scaler.fit(data)
+        data  = scaler.transform(data)
+
+        return data
