@@ -75,6 +75,7 @@ flags.DEFINE_integer("n_samples",None,"Number of features in the dataset.")
 flags.DEFINE_integer("n_features",None,"Number of features in the dataset.")                     
 flags.DEFINE_boolean("sample", False,
                      "Sample output from the model. Assume training was already done. Save sample output to file.")
+flags.DEFINE_boolean("scale", True, "Scale the dataset using the MinMaxScaler")                    
 flags.DEFINE_integer("works_per_composer", None,
                      "Limit number of works per composer that is loaded.")
 flags.DEFINE_boolean("disable_feed_previous", False,
@@ -125,7 +126,7 @@ flags.DEFINE_boolean("pace_events", False,            #
                    "When parsing input data, insert one dummy event at each quarter note if there is no tone.")
 flags.DEFINE_boolean("minibatch_d", False,            #
                    "Adding kernel features for minibatch diversity.")
-flags.DEFINE_boolean("unidirectional_d", False,        #
+flags.DEFINE_boolean("unidirectional_d", True,        #
                    "Unidirectional RNN instead of bidirectional RNN for D.")
 flags.DEFINE_boolean("profiling", False,              #
                    "Profiling. Writing a timeline.json file in plots dir.")
@@ -676,7 +677,7 @@ def main(_):
     print('Single composer: {}'.format(FLAGS.composer))
   #loader = music_data_utils.MusicDataLoader(FLAGS.datadir, FLAGS.select_validation_percentage, FLAGS.select_test_percentage, FLAGS.works_per_composer, FLAGS.pace_events, synthetic=synthetic, tones_per_cell=FLAGS.tones_per_cell, single_composer=FLAGS.composer)
   loader = data_loader.DataLoader(FLAGS.datadir,FLAGS.select_validation_percentage,FLAGS.select_test_percentage,filename=FLAGS.filename,
-                                  n_samples=FLAGS.n_samples,n_features=FLAGS.n_features,n_steps=FLAGS.timesteps)
+                                  n_samples=FLAGS.n_samples,n_features=FLAGS.n_features,n_steps=FLAGS.timesteps,scale=FLAGS.scale)
   
   # if FLAGS.synthetic_chords:
   #   # This is just a print out, to check the generated data.
